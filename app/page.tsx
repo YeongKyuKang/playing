@@ -5,14 +5,35 @@ import { useGame } from '@/hooks/useGame';
 import DrawingCanvas from '@/components/DrawingCanvas';
 import GameChat from '@/components/GameChat';
 
-const WORDS = ['사과', '바나나', '컴퓨터', '비행기', '자동차', '학교', '코끼리', '피아노', '축구', '고양이', '강아지', '해바라기', '아이스크림', '텔레비전', '크리스마스'];
+// 💡 누구나 그리기 쉬운 단어 100개 (동물, 음식, 사물 위주)
+const WORDS = [
+  // 1. 귀여운 동물 (20개)
+  '고양이', '강아지', '병아리', '돼지', '소', '오리', '호랑이', '사자', '토끼', '곰',
+  '기린', '코끼리', '원숭이', '뱀', '개구리', '물고기', '상어', '고래', '펭귄', '판다',
+
+  // 2. 맛있는 음식 (20개)
+  '사과', '바나나', '포도', '수박', '딸기', '햄버거', '피자', '치킨', '아이스크림', '케이크',
+  '식빵', '우유', '계란', '라면', '김밥', '떡볶이', '사탕', '초콜릿', '도넛', '옥수수',
+
+  // 3. 우리집 물건 (20개)
+  '우산', '안경', '모자', '양말', '신발', '가방', '시계', '컵', '숟가락', '젓가락',
+  '칫솔', '휴지', '거울', '열쇠', '자물쇠', '책', '연필', '지우개', '가위', '종이비행기',
+
+  // 4. 탈것 & 장소 & 자연 (20개)
+  '자동차', '비행기', '자전거', '배', '기차', '버스', '집', '학교', '병원', '놀이터',
+  '나무', '꽃', '해바라기', '선인장', '구름', '해', '달', '별', '눈사람', '무지개',
+
+  // 5. 신체 & 행동 & 직업 (20개)
+  '눈', '코', '입', '귀', '손', '발', '의사', '경찰', '소방관', '요리사',
+  '축구공', '야구방망이', '농구공', '수영', '낚시', '마이크', '침대', '텔레비전', '컴퓨터', '스마트폰'
+];
 
 export default function Home() {
   const [name, setName] = useState('');
-  // 💡 방 ID 고정
+  // 💡 방 ID는 고정 (편의상)
   const [roomId] = useState('e3975764-a744-48f0-b690-349c40333276'); 
   const [playerId, setPlayerId] = useState<string | null>(null);
-  const [targetRounds, setTargetRounds] = useState(1); // 👈 라운드 설정 상태
+  const [targetRounds, setTargetRounds] = useState(1); // 라운드 설정 상태
 
   const { room, players, timeLeft, hint, currentScore, isMyTurn, currentPlayer, currentRound } = useGame(roomId, playerId || '');
 
@@ -21,8 +42,10 @@ export default function Home() {
     if (!name) return alert("이름을 입력하세요!");
 
     try {
+      // (1) 방이 있는지 확인
       const { data: existingRoom } = await supabase.from('rooms').select('id').eq('id', roomId).maybeSingle();
 
+      // (2) 방이 없으면 생성 (필수값 'code' 포함)
       if (!existingRoom) {
         await supabase.from('rooms').insert({
           id: roomId,
@@ -33,7 +56,10 @@ export default function Home() {
         });
       }
 
+      // (3) 플레이어 수 확인
       const { count } = await supabase.from('players').select('*', { count: 'exact', head: true }).eq('room_id', roomId);
+      
+      // (4) 입장
       const { data, error } = await supabase.from('players').insert({
         room_id: roomId, name, gender: 'U', turn_order: (count || 0) + 1, score: 0
       }).select().single();
@@ -46,7 +72,7 @@ export default function Home() {
     }
   };
 
-  // 2. 게임 시작 (라운드 설정값 저장)
+  // 2. 게임 시작
   const startGame = async () => {
     const startWord = WORDS[Math.floor(Math.random() * WORDS.length)];
     await supabase.from('rooms').update({
@@ -54,7 +80,7 @@ export default function Home() {
       current_turn_order: 1,
       current_word: startWord,
       round_start_at: new Date().toISOString(),
-      rounds_per_game: targetRounds // 👈 선택한 라운드 수 저장
+      rounds_per_game: targetRounds
     }).eq('id', roomId);
   };
 
@@ -69,6 +95,7 @@ export default function Home() {
 
   // --- 화면 렌더링 ---
 
+  // [화면 1] 로그인
   if (!playerId) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-gray-100 text-gray-900 p-4">
@@ -87,6 +114,7 @@ export default function Home() {
     );
   }
 
+  // [화면 2] 게임 종료
   if (room?.status === 'FINISHED') {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50 text-gray-900 p-4">
@@ -109,6 +137,7 @@ export default function Home() {
     );
   }
 
+  // [화면 3] 게임 중
   return (
     <main className="flex min-h-screen flex-col items-center py-6 bg-slate-50 text-gray-900">
       {/* 상단 정보바 */}
