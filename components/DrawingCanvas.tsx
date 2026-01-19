@@ -1,23 +1,21 @@
 'use client';
-
 import { useEffect, useRef, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 interface Props {
   roomId: string;
-  isDrawer: boolean; // true면 그리는 사람, false면 보는 사람
+  isDrawer: boolean;
 }
 
 export default function DrawingCanvas({ roomId, isDrawer }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [color, setColor] = useState('#000000');
-
-  // 선 그리기 함수 (화면에 그리는 역할)
-  const drawLine = (x: number, y: number, type: 'start' | 'draw', strokeColor: string) => {
+  
+  // 그리기 함수
+  const draw = (x: number, y: number, type: string) => {
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
-
-    ctx.strokeStyle = strokeColor;
+    
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -25,67 +23,69 @@ export default function DrawingCanvas({ roomId, isDrawer }: Props) {
     if (type === 'start') {
       ctx.beginPath();
       ctx.moveTo(x, y);
-    } else {
+    } else if (type === 'draw') {
       ctx.lineTo(x, y);
       ctx.stroke();
+    } else if (type === 'clear') {
+      ctx.clearRect(0, 0, 350, 400);
     }
   };
 
-  // 1. 수신부 (남이 그리는 거 받아오기)
+  // 실시간 구독 (남이 그리는 것 받기)
   useEffect(() => {
-    const channel = supabase.channel(`room:${roomId}`)
+    const channel = supabase.channel(`canvas:${roomId}`)
       .on('broadcast', { event: 'draw' }, ({ payload }) => {
-        if (!isDrawer) {
-          // 내가 그리는 사람이 아닐 때만 그림
-          drawLine(payload.x, payload.y, payload.type, payload.color);
-        }
+        if (!isDrawer) draw(payload.x, payload.y, payload.type);
+      })
+      .on('broadcast', { event: 'clear' }, () => {
+        if (!isDrawer) draw(0, 0, 'clear');
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [roomId, isDrawer]);
 
-  // 2. 송신부 (내 터치/마우스 좌표 보내기)
+  // 내 터치/마우스 이벤트 처리
   const handleInput = (e: any) => {
-    if (!isDrawer) return; // 출제자가 아니면 입력 무시
-
-    // 마우스/터치 좌표 통일 로직
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    
+    if (!isDrawer) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
     const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     const x = clientX - rect.left;
     const y = clientY - rect.top;
     
-    // 이벤트 타입 결정 (누르기 시작 vs 움직임)
     const type = (e.type === 'mousedown' || e.type === 'touchstart') ? 'start' : 'draw';
-
-    // 1) 내 화면에 바로 그리기 (반응속도 때문)
-    drawLine(x, y, type, color);
-
-    // 2) 서버(Supabase)로 좌표 쏘기
-    supabase.channel(`room:${roomId}`).send({
-      type: 'broadcast',
-      event: 'draw',
-      payload: { x, y, type, color }
-    });
+    
+    draw(x, y, type); // 내 화면에 그리기
+    supabase.channel(`canvas:${roomId}`).send({
+      type: 'broadcast', event: 'draw', payload: { x, y, type }
+    }); // 서버로 보내기
   };
 
+  const clearCanvas = () => {
+    draw(0, 0, 'clear');
+    supabase.channel(`canvas:${roomId}`).send({ type: 'broadcast', event: 'clear' });
+  };
+
+  // 턴이 바뀌면 캔버스 초기화
+  useEffect(() => clearCanvas(), [roomId]);
+
   return (
-    <canvas
-      ref={canvasRef}
-      width={350}
-      height={400}
-      className="border-2 border-black bg-white mx-auto touch-none rounded-lg shadow-md"
-      onMouseDown={handleInput}
-      onMouseMove={(e) => e.buttons === 1 && handleInput(e)} // 마우스 클릭 상태일 때만
-      onTouchStart={handleInput}
-      onTouchMove={handleInput}
-    />
+    <div className="relative">
+      <canvas
+        ref={canvasRef} width={350} height={400}
+        className={`bg-white border-2 rounded-lg touch-none ${isDrawer ? 'cursor-crosshair border-blue-500 shadow-md' : 'cursor-not-allowed border-gray-300'}`}
+        onMouseDown={handleInput} onMouseMove={(e) => e.buttons === 1 && handleInput(e)}
+        onTouchStart={handleInput} onTouchMove={handleInput}
+      />
+      {isDrawer && (
+        <button onClick={clearCanvas} className="absolute top-2 right-2 bg-red-100 text-red-600 px-2 py-1 text-xs rounded border border-red-200">
+          지우기
+        </button>
+      )}
+    </div>
   );
 }

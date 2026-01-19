@@ -1,37 +1,101 @@
 'use client';
-
 import { useState } from 'react';
-import DrawingCanvas from '../components/DrawingCanvas';
+import { supabase } from '@/lib/supabase';
+import { useGame } from '@/hooks/useGame';
+import DrawingCanvas from '@/components/DrawingCanvas';
+import GameChat from '@/components/GameChat';
+
+const WORDS = ['사과', '바나나', '컴퓨터', '비행기', '자동차', '학교', '코끼리', '피아노', '축구'];
 
 export default function Home() {
-  // 테스트를 위해 '출제자 모드' 토글 버튼을 만듭니다.
-  const [isDrawer, setIsDrawer] = useState(true);
-  const roomId = 'test-room-1'; // 테스트용 고정 방 ID
+  const [name, setName] = useState('');
+  // ⚠️ 본인의 실제 Room ID로 교체 필수! (Supabase 'rooms' 테이블 확인)
+  const [roomId] = useState('e3975764-a744-48f0-b690-349c40333276'); 
+  const [playerId, setPlayerId] = useState<string | null>(null);
+
+  const { room, players, timeLeft, hint, currentScore, isMyTurn, currentPlayer } = useGame(roomId, playerId || '');
+
+  // 입장하기
+  const joinGame = async () => {
+    if (!name) return alert("이름을 입력하세요!");
+    const { count } = await supabase.from('players').select('*', { count: 'exact', head: true }).eq('room_id', roomId);
+    const { data, error } = await supabase.from('players').insert({
+      room_id: roomId, name, gender: 'U', turn_order: (count || 0) + 1, score: 0
+    }).select().single();
+
+    if (error) alert("입장 에러!");
+    else setPlayerId(data.id);
+  };
+
+  // 게임 시작 (대기 상태에서 누름)
+  const startGame = async () => {
+    const startWord = WORDS[Math.floor(Math.random() * WORDS.length)];
+    await supabase.from('rooms').update({
+      status: 'PLAYING',
+      current_turn_order: 1,
+      current_word: startWord,
+      round_start_at: new Date().toISOString()
+    }).eq('id', roomId);
+  };
+
+  // 다음 문제 출제 (단어 없을 때)
+  const nextWord = async () => {
+    const newWord = WORDS[Math.floor(Math.random() * WORDS.length)];
+    await supabase.from('rooms').update({
+      current_word: newWord,
+      round_start_at: new Date().toISOString()
+    }).eq('id', roomId);
+  };
+
+  // --- 화면 렌더링 ---
+  if (!playerId) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-gray-100 p-4">
+        <h1 className="text-3xl font-bold mb-6">🎨 텔레파시 드로잉</h1>
+        <input className="border p-2 rounded mb-2 w-64 text-center" placeholder="닉네임" value={name} onChange={e => setName(e.target.value)} />
+        <button onClick={joinGame} className="bg-blue-600 text-white px-6 py-2 rounded font-bold">입장하기</button>
+      </main>
+    );
+  }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-4 bg-gray-100">
-      <h1 className="text-2xl font-bold mb-4">텔레파시 드로잉 (방: {roomId})</h1>
+    <main className="flex min-h-screen flex-col items-center py-6 bg-slate-50">
+      <div className="w-full max-w-md bg-white p-3 rounded-xl shadow mb-4 flex justify-between items-center text-sm">
+        <div>순서: <span className="font-bold">{room?.current_turn_order || 1}/9</span></div>
+        <div className={`font-black text-xl ${timeLeft < 30 ? 'text-red-500' : 'text-blue-500'}`}>
+          {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+        </div>
+        <div className="text-green-600 font-bold">+{currentScore}점</div>
+      </div>
+
+      <div className="mb-4 text-center">
+        {isMyTurn ? (
+          <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg font-bold border border-blue-200">
+            제시어: <span className="text-xl text-black ml-2">{room?.current_word || "대기 중"}</span>
+            {!room?.current_word && <button onClick={nextWord} className="ml-2 text-xs bg-blue-500 text-white px-2 py-1 rounded">단어 받기</button>}
+          </div>
+        ) : (
+          <div className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold">
+            그리는 사람: {currentPlayer?.name} <span className="ml-2 text-orange-600">힌트: {hint}</span>
+          </div>
+        )}
+      </div>
+
+      <DrawingCanvas roomId={roomId} isDrawer={isMyTurn} />
       
-      <div className="mb-4">
-        <button
-          onClick={() => setIsDrawer(!isDrawer)}
-          className={`px-4 py-2 rounded-lg font-bold text-white ${
-            isDrawer ? 'bg-blue-600' : 'bg-gray-500'
-          }`}
-        >
-          {isDrawer ? '🖌️ 나는 출제자 (그리기)' : '👀 나는 팀원 (지켜보기)'}
-        </button>
-      </div>
+      <GameChat 
+        roomId={roomId} playerId={playerId} isDrawer={isMyTurn} 
+        currentWord={room?.current_word} currentScore={currentScore} 
+      />
 
-      <div className="relative">
-        {/* 내가 출제자가 아니면 투명 막으로 덮어서 터치 방지 (선택사항) */}
-        {!isDrawer && <div className="absolute inset-0 z-10 cursor-not-allowed" />}
-        <DrawingCanvas roomId={roomId} isDrawer={isDrawer} />
-      </div>
-
-      <p className="mt-4 text-gray-600 text-sm">
-        * 크롬 창을 2개 띄우고 하나는 출제자, 하나는 팀원으로 설정해서 테스트해보세요.
-      </p>
+      {room?.status === 'WAITING' && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg text-center">
+            <h2 className="text-xl font-bold mb-4">대기 중... ({players.length}명)</h2>
+            <button onClick={startGame} className="bg-green-500 text-white px-6 py-3 rounded-lg font-bold">게임 시작</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
