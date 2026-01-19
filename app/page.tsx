@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import DrawingCanvas from '@/components/DrawingCanvas';
+import DrawingCanvas from '../components/DrawingCanvas';
 
 export default function Home() {
   // 테스트를 위해 '출제자 모드' 토글 버튼을 만듭니다.
