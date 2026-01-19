@@ -49,7 +49,13 @@ export function useGame(roomId: string, userId: string) {
 
       if (remaining <= 0) {
         // [시간 초과] 현재 턴인 플레이어가 대표로 종료 요청
-        const isMyTurn = players.find(p => p.id === userId)?.turn_order === room.current_turn_order;
+        // 주의: 여기서 currentPlayer 계산 로직은 아래와 동일하게 맞춰야 함
+        const totalP = players.length || 1;
+        const currentTurn = room.current_turn_order || 1;
+        const effectiveOrder = ((currentTurn - 1) % totalP) + 1;
+        
+        const isMyTurn = players.find(p => p.id === userId)?.turn_order === effectiveOrder;
+
         if (isMyTurn) {
           supabase.rpc('finish_round', { p_room_id: roomId, p_winner_id: null, p_score_add: 0 });
         }
@@ -59,14 +65,9 @@ export function useGame(roomId: string, userId: string) {
         setTimeLeft(remaining);
 
         // [힌트 & 점수 로직]
-        // 0~29초: 힌트 0개, 20점
-        // 30~59초: 힌트 1개, 15점 ...
         const hintCount = Math.floor(elapsedSec / 30);
-        
-        // 점수 계산 (최소 0점)
         setCurrentScore(Math.max(0, 20 - (hintCount * 5)));
 
-        // 힌트 문자열 생성 (예: "사과" -> "사 O")
         const word = room.current_word;
         let maskedWord = '';
         for (let i = 0; i < word.length; i++) {
@@ -75,7 +76,7 @@ export function useGame(roomId: string, userId: string) {
           } else {
             maskedWord += 'O';
           }
-          maskedWord += ' '; // 글자 사이 공백
+          maskedWord += ' '; 
         }
         setHint(maskedWord.trim());
       }
@@ -84,9 +85,18 @@ export function useGame(roomId: string, userId: string) {
     return () => clearInterval(interval);
   }, [room, players, userId, roomId]);
 
-  // 현재 턴 플레이어 정보
-  const currentPlayer = players.find(p => p.turn_order === room?.current_turn_order);
+  // [수정됨] 턴 계산 로직 (순환 구조)
+  const totalPlayers = players.length || 1;
+  const currentTurnIndex = room?.current_turn_order || 1;
+  
+  // 예: 9명일 때 10번째 턴 -> (9 % 9) + 1 = 1번 플레이어
+  const effectiveTurnOrder = ((currentTurnIndex - 1) % totalPlayers) + 1;
+
+  const currentPlayer = players.find(p => p.turn_order === effectiveTurnOrder);
   const isMyTurn = currentPlayer?.id === userId;
 
-  return { room, players, timeLeft, hint, currentScore, isMyTurn, currentPlayer };
+  // 현재 몇 바퀴째인지 계산 (화면 표시용)
+  const currentRound = Math.ceil(currentTurnIndex / totalPlayers);
+
+  return { room, players, timeLeft, hint, currentScore, isMyTurn, currentPlayer, currentRound };
 }
